@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="theme-color" content="#5f259f">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icon-192.png">
+<title>Txn Parser</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<style>
+  :root{--bg:#0f1115;--card:#1a1d24;--accent:#5f259f;--accent2:#7c3aed;--text:#e7e9ee;--muted:#9aa0ac;--border:#2a2e38;--good:#22c55e;--bad:#ef4444}
+  *{box-sizing:border-box}
+  body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;background:var(--bg);color:var(--text);padding-bottom:env(safe-area-inset-bottom)}
+  header{background:linear-gradient(135deg,var(--accent),var(--accent2));padding:calc(20px + env(safe-area-inset-top)) 20px 20px}
+  header h1{margin:0;font-size:20px}
+  header p{margin:6px 0 0;opacity:.85;font-size:13px}
+  #installBtn{margin-top:12px;background:rgba(255,255,255,.15);border:1px solid rgba(255,255,255,.3);color:#fff;padding:8px 14px;border-radius:8px;font-size:13px;display:none}
+  main{max-width:1200px;margin:0 auto;padding:16px}
+  .card{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:18px;margin-bottom:16px}
+  .tabs{display:flex;gap:8px;margin-bottom:16px;overflow-x:auto;padding-bottom:4px}
+  .tab{padding:11px 14px;border-radius:10px;border:1px solid var(--border);cursor:pointer;background:var(--card);font-size:13px;white-space:nowrap}
+  .tab.active{background:var(--accent2);border-color:var(--accent2)}
+  .drop{border:2px dashed var(--border);border-radius:12px;padding:26px 16px;text-align:center;cursor:pointer;transition:.2s}
+  .drop:hover,.drop.over{border-color:var(--accent2);background:#22162e}
+  .drop input{display:none}
+  label.field{display:block;font-size:13px;color:var(--muted);margin:10px 0 4px}
+  input[type=text],input[type=password],select{width:100%;padding:10px 12px;border-radius:8px;border:1px solid var(--border);background:#0f1115;color:var(--text)}
+  .row{display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end}
+  .row>div{flex:1;min-width:160px}
+  button{background:var(--accent2);color:#fff;border:0;padding:10px 16px;border-radius:9px;font-size:14px;cursor:pointer}
+  button:hover{filter:brightness(1.1)}
+  button.ghost{background:transparent;border:1px solid var(--border)}
+  button.danger{background:transparent;border:1px solid var(--bad);color:var(--bad);padding:4px 10px;font-size:12px}
+  button:disabled{opacity:.4;cursor:not-allowed}
+  .btns{display:flex;gap:10px;flex-wrap:wrap;margin-top:14px}
+  .queue{margin-top:14px;display:flex;flex-direction:column;gap:8px}
+  .qitem{display:flex;align-items:center;gap:12px;padding:10px 12px;border:1px solid var(--border);border-radius:10px;font-size:13px}
+  .qitem .src{font-weight:600;color:var(--accent2);min-width:70px}
+  .qitem .nm{flex:1;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .qitem .st{font-size:12px}
+  .scroll{max-height:62vh;overflow:auto;border:1px solid var(--border);border-radius:10px;margin-top:10px}
+  table{width:100%;border-collapse:collapse;font-size:13px;min-width:900px}
+  th,td{padding:8px 10px;text-align:left;border-bottom:1px solid var(--border);white-space:nowrap}
+  th{color:var(--muted);font-weight:600;position:sticky;top:0;background:var(--card)}
+  td.amt{text-align:right;font-variant-numeric:tabular-nums}
+  td[contenteditable]:focus{background:#22162e;outline:none}
+  .credit{color:var(--good)}.debit{color:var(--bad)}
+  .badge{font-size:11px;padding:2px 7px;border-radius:20px;background:#2a2e38;color:var(--muted)}
+  .badge.link{background:#1e3a2e;color:var(--good)}
+  .stat{display:inline-block;margin-right:18px;font-size:13px;color:var(--muted)}
+  .stat b{color:var(--text);font-size:16px;display:block}
+  .msg{font-size:13px;margin-top:10px;min-height:18px}
+  .err{color:var(--bad)}.ok{color:var(--good)}
+  .hint{font-size:12px;color:var(--muted);margin-top:8px;line-height:1.5}
+  .filterbar{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-top:10px}
+  .filterbar input,.filterbar select{width:auto;flex:1;min-width:130px}
+</style>
+</head>
+<body>
+<header>
+  <h1>Transaction Parser</h1>
+  <p>Upload statements from multiple sources, parse together, get one consolidated sheet plus a tab per file. Runs fully in your browser.</p>
+  <button id="installBtn">Install app</button>
+</header>
+<main>
+  <div class="tabs" id="tabBar">
+    <div class="tab active" data-tab="upload">Upload</div>
+    <!-- result tabs injected here after parsing -->
+  </div>
+
+  <!-- UPLOAD TAB -->
+  <div id="view-upload">
+    <div class="card">
+      <div class="row">
+        <div>
+          <label class="field" for="srcSel">Statement source</label>
+          <select id="srcSel">
+            <option value="phonepe">PhonePe</option>
+            <option value="gpay">GPay</option>
+            <option value="hdfc">HDFC Bank</option>
+            <option value="axis">Axis Bank</option>
+            <option value="sbi">SBI</option>
+            <option value="generic">Other bank (generic UPI)</option>
+          </select>
+        </div>
+        <div>
+          <label class="field" for="pwd">PDF password (optional)</label>
+          <input type="password" id="pwd" placeholder="if protected">
+        </div>
+      </div>
+      <div class="drop" id="drop" style="margin-top:12px">
+        <strong>Add file(s) for the selected source</strong><br>
+        <span style="color:var(--muted);font-size:13px">click or drop &mdash; you can add several, then change the source and add more</span>
+        <input type="file" id="file" accept="application/pdf" multiple>
+      </div>
+      <div class="queue" id="queue"></div>
+      <div class="btns">
+        <button id="parseAllBtn" disabled>Parse All</button>
+        <button id="clearQueueBtn" class="ghost">Clear queue</button>
+      </div>
+      <div class="msg" id="uploadMsg"></div>
+      <div class="hint">Tip: pick a source, add its file(s), then switch the source dropdown and add the next one. Everything parses together when you hit Parse All.</div>
+    </div>
+  </div>
+
+  <!-- CONSOLIDATED TAB -->
+  <div id="view-all" style="display:none">
+    <div class="card">
+      <div>
+        <span class="stat">Transactions<b id="sCount">0</b></span>
+        <span class="stat">Total Debit<b id="sDebit" class="debit">&#8377;0</b></span>
+        <span class="stat">Total Credit<b id="sCredit" class="credit">&#8377;0</b></span>
+        <span class="stat">Linked (deduped)<b id="sLinked">0</b></span>
+      </div>
+      <div class="filterbar">
+        <input type="text" id="search" placeholder="Search party / note / id&hellip;">
+        <select id="srcFilter"><option value="">All sources</option></select>
+        <select id="typeFilter"><option value="">All types</option><option>DEBIT</option><option>CREDIT</option></select>
+      </div>
+      <div class="scroll"><table><thead id="allHead"></thead><tbody id="allBody"></tbody></table></div>
+      <div class="hint">The <b>Note</b> column is editable. Rows tagged <span class="badge link">linked</span> were merged from more than one source (matched by UPI reference number); extra source-specific details appear in their own columns.</div>
+      <div class="btns">
+        <button id="csvBtn">Download CSV</button>
+        <button id="xlsxBtn">Download Excel (all tabs)</button>
+        <button id="copyBtn" class="ghost">Copy for Sheets</button>
+      </div>
+      <div class="msg" id="msg2"></div>
+    </div>
+  </div>
+
+  <!-- PER-FILE TABS get injected here -->
+  <div id="fileViews"></div>
+</main>
+
+<script src="parsers.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
