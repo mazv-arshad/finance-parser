@@ -197,6 +197,19 @@ function finishTxn(c, bank){
   };
 }
 
+/* Strip common bank/UPI boilerplate from a candidate note. Keeps anything that
+   looks like a real user-typed description (e.g. PETROL, RENT, DINNER). */
+function cleanNote(raw){
+  let s=(raw||'').replace(/\s+/g,' ').trim();
+  if(!s) return '';
+  // Exact-match boilerplate (case-insensitive) -> drop entirely
+  const exact=/^(PAYMENT FROM PHONE|PAYMENT TO PHONE|PAYMENT|UPI|UPI PAYMENT|NA|N\/A|NULL|COLLECT|PAY|PAYMEN|PAYM|UPIINT|UPI INT|UPIINTENT|INTENT|SENT FROM PHONE|RECEIVED FROM PHONE|MANUAL|OTHERS|OTHER)$/i;
+  if(exact.test(s)) return '';
+  // "PAY TO <name>" / "PAID TO <name>" is usually auto-filled boilerplate, not a note
+  if(/^(PAY|PAID)\s+TO\b/i.test(s)) return '';
+  return s;
+}
+
 /* Decompose a bank narration string. Dispatches by bank format. */
 function parseBankNarration(narrRaw, bank){
   let narr=(narrRaw||'').replace(/\s+/g,' ').trim();
@@ -224,8 +237,9 @@ function parseBankNarration(narrRaw, bank){
       const segs=narr.split('/');
       const ref=(segs[2]||'').match(/\d{6,}/)?segs[2].trim():'';
       const name=(segs[3]||'').trim();
-      const counterBank=segs.slice(4).join('/').replace(/\/+$/,'').trim();
-      return {party:name||'\u2014', vpa:'', ref, bank:counterBank, note:''};
+      const descriptor=(segs[4]||'').trim();          // e.g. "Pay to" / "Paymen" / "UPIInt" / a real note
+      const counterBank=segs.slice(5).join('/').replace(/\/+$/,'').trim() || segs.slice(4).join('/').replace(/\/+$/,'').trim();
+      return {party:name||'\u2014', vpa:'', ref, bank:counterBank, note:cleanNote(descriptor)};
     }
     if(/^SB:/i.test(narr) || /Int\.Pd/i.test(narr)) return {party:'Interest / Bank', vpa:'', ref:'', bank:'', note:''};
     return {party:narr.slice(0,50), vpa:'', ref:'', bank:'', note:''};
@@ -244,16 +258,23 @@ function parseBankNarration(narrRaw, bank){
     const body=narr.replace(/^UPI-/i,'');
     const segs=body.split('-').map(s=>s.replace(/\s+/g,' ').trim());
     const vpaIdx=segs.findIndex(s=>s.includes('@'));
-    let party='',vpa='',ref='';
+    let party='',vpa='',ref='',note='';
     if(vpaIdx>=0){
       party=segs.slice(0,vpaIdx).join('-').replace(/\s+/g,' ').trim();
       vpa=segs[vpaIdx].replace(/\s+/g,'').replace(/(@[A-Za-z0-9.]+).*/,'$1');
-      const after=segs.slice(vpaIdx+1).join('-');
-      ref=(after.match(/(\d{9,})/)||[,''])[1];
+      // Locate the ref-number segment AFTER the vpa; the note is whatever follows it.
+      const afterSegs=segs.slice(vpaIdx+1);
+      const refSegIdx=afterSegs.findIndex(s=>/\d{9,}/.test(s));
+      if(refSegIdx>=0){
+        ref=(afterSegs[refSegIdx].match(/(\d{9,})/)||[,''])[1];
+        note=cleanNote(afterSegs.slice(refSegIdx+1).filter(Boolean).join('-'));
+      }else{
+        ref=(afterSegs.join('-').match(/(\d{9,})/)||[,''])[1];
+      }
     }else{
       party=segs[0]; ref=(body.match(/(\d{9,})/)||[,''])[1];
     }
-    return {party, vpa, ref, note:''};
+    return {party, vpa, ref, note};
   }
   if(/^SB:/i.test(narr) || /Int\.Pd/i.test(narr)) return {party:'Interest / Bank', vpa:'', ref:'', note:''};
   return {party:narr.slice(0,50), vpa:'', ref:'', note:''};
